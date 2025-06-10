@@ -4,8 +4,32 @@ Simple GUI for a rotary Modbus Encoder
 
 ## Functions
 
-### draw_tick
-Draws the ticks around the circle every degree you give it. Simple if statement in the beginning changes the circle depending on if you are recording clockwise or counterclockwise movement. We track the direction of movement using register CCW_ADDR defined in the beginning of the file. 
+### init
+Stores colors for each object
+Stores fonts for each text object
+Stores logo to be displayed (image)
+Sets up UI and compass
+
+### setup_ui
+Creates main frame for the application and configures the frame
+Places the image (logo) in the upper left of the frame
+Places the labels for connection and data readouts as well as toggle button 
+
+### draw_initial_compass
+Creates oval for the initial compass
+Updates tick marks around the compass
+
+### update_tick
+Depending on rotation direction, creates the ticks for around the compass
+
+### update_connection_status
+Updates the connection status depending on connection status
+
+### update_gui_labels
+Updates the text labels such as the data readouts
+
+### toggle_direction
+Reads current direction based on the Modbus register and when button is pressed, toggles the direction and changes the value in the Modbus register
 
 ### update_arrow
 Updates the arrow around the spinner using the value passed into it and converting it to radians.
