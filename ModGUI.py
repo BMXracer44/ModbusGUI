@@ -54,7 +54,7 @@ class ModbusGUI:
         self.logo_photo = None  # Store a reference to prevent garbage collection
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, "JoralLogo.jpg")
+            logo_path = os.path.join(script_dir, "JoralLogo.png")
             
             print(f"Attempting to load logo from: {logo_path}")
             
