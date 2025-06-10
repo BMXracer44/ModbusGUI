@@ -27,14 +27,14 @@ class ModbusGUI:
         
         # --- Style and Color Configuration ---
         self.colors = {
-            "bg": "#2E2E2E",
-            "canvas_bg": "#3A3A3A",
+            "bg": "#B1B1B1",
+            "canvas_bg": "#FFFFFF",
             "dial_outline": "#505050",
-            "text_main": "#FF0000",
-            "text_accent": "#7E7E7E",
-            "needle": "#FF0000",
+            "text_main": "#000000",
+            "text_accent": "#4E4E4E",
+            "needle": "#ED1F29",
             "tick": "#909090",
-            "button_bg": "#7C0000",
+            "button_bg": "#ED1F29",
             "button_fg": "#FFFFFF",
             "status_ok": "#4CAF50",      # Green for connected
             "status_error": "#F44336"   # Red for disconnected
@@ -54,7 +54,7 @@ class ModbusGUI:
         self.logo_photo = None  # Store a reference to prevent garbage collection
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, "JoralLogo.png")
+            logo_path = os.path.join(script_dir, "JoralLogo.png") # Updated to PNG
             
             print(f"Attempting to load logo from: {logo_path}")
             
@@ -62,7 +62,7 @@ class ModbusGUI:
             img = img.resize((180, 60), Image.Resampling.LANCZOS)
             self.logo_photo = ImageTk.PhotoImage(img)
         except FileNotFoundError:
-            print("Warning: JoralLogo.jpg not found. Make sure it is in the same directory as the script.")
+            print("Warning: JoralLogo.png not found. Make sure it is in the same directory as the script.")
         except Exception as e:
             print(f"Error loading logo: {e}")
 
@@ -95,7 +95,11 @@ class ModbusGUI:
         if self.logo_photo:
             # Store the label as an instance attribute to prevent garbage collection
             self.logo_label = tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"])
-            self.logo_label.pack(side=tk.LEFT) # Pack to the right within the top frame
+            self.logo_label.pack(side=tk.LEFT) # Pack to the left within the top frame
+
+
+        self.title_label = tk.Label(top_frame, text="Rotary Ethernet/IP Encoder w/ Modbus", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_main"])
+        self.title_label.pack(side=tk.LEFT, fill=tk.Y, padx=(20,0))
 
         # --- Content Frame for Status and Canvas ---
         content_frame = tk.Frame(main_frame, bg=self.colors["bg"])
@@ -112,19 +116,19 @@ class ModbusGUI:
         tk.Label(status_frame, text="DATA READOUTS", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w", pady=(10, 0))
         
         tk.Label(status_frame, text="Position Counts", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.counter_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg="white")
+        self.counter_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.counter_label.pack(anchor="w")
 
         tk.Label(status_frame, text="Total Turns", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.turn_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg="white")
+        self.turn_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.turn_label.pack(anchor="w")
 
         tk.Label(status_frame, text="Velocity (RPM)", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.velocity_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg="white")
+        self.velocity_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.velocity_label.pack(anchor="w")
 
         tk.Label(status_frame, text="Direction", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.direction_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg="white")
+        self.direction_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.direction_label.pack(anchor="w")
 
         # --- Direction Toggle Button ---
@@ -139,6 +143,23 @@ class ModbusGUI:
                                        command=self.toggle_direction)
         self.toggle_button.pack(anchor="w", pady=(30, 0))
 
+        # Status Panel (Right Side)
+        status_frame = tk.Frame(content_frame, bg=self.colors["bg"])
+        status_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0))
+
+        tk.Label(status_frame, text="FEATURES", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w")
+        
+        self.feature1_label = tk.Label(status_frame, text=" - Dual Protocol Ethernet/IP \n  and Modbus Connectivity", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        self.feature1_label.pack(anchor="w")
+
+        self.feature2_label = tk.Label(status_frame, text=" - Web Browser for Easy\n  Encoder Configuration", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        self.feature2_label.pack(anchor="w")
+
+        self.feature3_label = tk.Label(status_frame, text=" - Static IP or DHCP", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        self.feature3_label.pack(anchor="w")
+
+        self.feature4_label = tk.Label(status_frame, text=" - IP69K Rated", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        self.feature4_label.pack(anchor="w")
 
         # Canvas for Compass (Right Side)
         canvas_width = self.root.winfo_screenwidth() * 0.5
@@ -170,34 +191,49 @@ class ModbusGUI:
         except Exception:
             initial_rotation = 1  # Default to CW
             
-        for angle in range(0, 360, 45):
+        # Draw a tick every 10 degrees
+        for angle in range(0, 360, 10):
             self.update_tick(angle, initial_rotation)
 
     def update_tick(self, angle_deg, rotation_mode):
-        """Creates or updates a single compass tick and its label."""
+        """Creates or updates a single compass tick and its label, with major/minor ticks."""
         if rotation_mode == 1:
             angle_rad = math.radians(angle_deg - 90)
         else:
             angle_rad = math.radians(-angle_deg - 90)
 
+        # Differentiate between major (every 45 deg) and minor (every 10 deg) ticks
+        is_major_tick = (angle_deg % 45 == 0)
+        tick_length = 30 if is_major_tick else 15
+        tick_width = 5 if is_major_tick else 3
+
         # Coordinates for tick mark
         x1 = self.center[0] + self.radius * math.cos(angle_rad)
         y1 = self.center[1] + self.radius * math.sin(angle_rad)
-        x2 = self.center[0] + (self.radius - 25) * math.cos(angle_rad)
-        y2 = self.center[1] + (self.radius - 25) * math.sin(angle_rad)
+        x2 = self.center[0] + (self.radius - tick_length) * math.cos(angle_rad)
+        y2 = self.center[1] + (self.radius - tick_length) * math.sin(angle_rad)
         
-        # Coordinates for label
-        label_x = self.center[0] + (self.radius + 35) * math.cos(angle_rad)
-        label_y = self.center[1] + (self.radius + 35) * math.sin(angle_rad)
-
-        if angle_deg in self.tick_labels:
+        if angle_deg in self.tick_lines:
+            # Update existing line
             self.canvas.coords(self.tick_lines[angle_deg], x1, y1, x2, y2)
-            self.canvas.coords(self.tick_labels[angle_deg], label_x, label_y)
+            self.canvas.itemconfig(self.tick_lines[angle_deg], width=tick_width)
+            
+            # Update existing label if it's a major tick
+            if is_major_tick and angle_deg in self.tick_labels:
+                label_x = self.center[0] + (self.radius + 35) * math.cos(angle_rad)
+                label_y = self.center[1] + (self.radius + 35) * math.sin(angle_rad)
+                self.canvas.coords(self.tick_labels[angle_deg], label_x, label_y)
         else:
-            line_id = self.canvas.create_line(x1, y1, x2, y2, width=3, fill=self.colors["tick"])
-            label_id = self.canvas.create_text(label_x, label_y, text=f"{angle_deg}°", font=self.fonts["compass"], fill=self.colors["text_main"])
+            # Create new line
+            line_id = self.canvas.create_line(x1, y1, x2, y2, width=tick_width, fill=self.colors["tick"])
             self.tick_lines[angle_deg] = line_id
-            self.tick_labels[angle_deg] = label_id
+            
+            # Create new label only for major ticks
+            if is_major_tick:
+                label_x = self.center[0] + (self.radius + 35) * math.cos(angle_rad)
+                label_y = self.center[1] + (self.radius + 35) * math.sin(angle_rad)
+                label_id = self.canvas.create_text(label_x, label_y, text=f"{angle_deg}°", font=self.fonts["compass"], fill=self.colors["text_main"])
+                self.tick_labels[angle_deg] = label_id
 
     def update_arrow(self, modbus_value, rotation_mode):
         """Creates or updates the needle polygon."""
@@ -305,7 +341,8 @@ class ModbusGUI:
                 # --- Schedule GUI Updates ---
                 if rotation != rotation_prev:
                     print(f"Rotation changed to {'CW' if rotation == 1 else 'CCW'}")
-                    for angle in self.tick_labels.keys():
+                    # Update all ticks when direction changes
+                    for angle in self.tick_lines.keys():
                         update_func = partial(self.update_tick, angle, rotation)
                         self.root.after(0, update_func)
                     rotation_prev = rotation
