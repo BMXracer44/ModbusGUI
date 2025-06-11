@@ -357,7 +357,7 @@ class ModbusGUI:
                     client.close()
                 time.sleep(2)
             
-            time.sleep(0.1)
+            time.sleep(0.01)
 
     def close(self):
         """Cleanly close the application."""
