@@ -1,20 +1,21 @@
 import tkinter as tk
 import math
 import os
-from pymodbus.client.sync import ModbusTcpClient
+from pymodbus.client import ModbusTcpClient
 from threading import Thread
 import time
 from functools import partial
 from PIL import Image, ImageTk
 
 # --- Modbus Configuration ---
-MODBUS_HOST = '192.168.30.218'  # Modbus Device IP
+MODBUS_HOST = '192.168.30.220'  # Modbus Device IP
 MODBUS_PORT = 502
 REGISTER_ADDR = 1  # Register Address for the main counter
 REGISTER_COUNT = 1
 VELOCITY_ADDR = 3  # Register Address for velocity
 TURN_ADDR = 7      # Register Address for the turn counter
 CCW_ADDR = 18      # Register Address for rotation direction (0=CCW, 1=CW)
+SLAVE_ID = 1       # The Modbus Slave ID of the device
 
 # --- Create Modbus Client ---
 client = ModbusTcpClient(MODBUS_HOST, port=MODBUS_PORT)
@@ -42,6 +43,7 @@ class ModbusGUI:
         self.fonts = {
             "main": ("Segoe UI", 12),
             "value": ("Segoe UI Semibold", 28),
+            "features": ("Segoe UI Semibold", 18),
             "title": ("Segoe UI Bold", 16),
             "compass": ("Segoe UI", 14),
             "button": ("Segoe UI Semibold", 11),
@@ -54,7 +56,7 @@ class ModbusGUI:
         self.logo_photo = None  # Store a reference to prevent garbage collection
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, "JoralLogo.png") # Updated to PNG
+            logo_path = os.path.join(script_dir, "JoralLogo.png")
             
             print(f"Attempting to load logo from: {logo_path}")
             
@@ -74,10 +76,9 @@ class ModbusGUI:
         # --- UI Setup ---
         self.setup_ui()
 
-        # --- Initial Drawing ---
-        self.draw_initial_compass()
-
         # --- Start Background Thread ---
+        # The thread will now handle the initial connection and compass drawing.
+        self.is_initialized = False # Flag to ensure initial draw happens only once.
         self.running = True
         self.modbus_thread = Thread(target=self.update_loop, daemon=True)
         self.modbus_thread.start()
@@ -88,110 +89,81 @@ class ModbusGUI:
         main_frame = tk.Frame(self.root, bg=self.colors["bg"])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # --- Top Frame for Logo ---
+        # --- Top Frame for Logo and Title ---
         top_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         top_frame.pack(side=tk.TOP, fill=tk.X)
         
         if self.logo_photo:
-            # Store the label as an instance attribute to prevent garbage collection
             self.logo_label = tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"])
-            self.logo_label.pack(side=tk.LEFT) # Pack to the left within the top frame
+            self.logo_label.pack(side=tk.LEFT) 
 
+        self.title_label = tk.Label(top_frame, text="Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        self.title_label.pack(side=tk.LEFT, expand=True)
 
-        self.title_label = tk.Label(top_frame, text="Rotary Ethernet/IP Encoder w/ Modbus", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_main"])
-        self.title_label.pack(side=tk.LEFT, fill=tk.Y, padx=(20,0))
-
-        # --- Content Frame for Status and Canvas ---
+        # --- Content Frame for Sidebars and Canvas ---
         content_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(10,0))
 
         # Status Panel (Left Side)
-        status_frame = tk.Frame(content_frame, bg=self.colors["bg"])
-        status_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
+        left_status_frame = tk.Frame(content_frame, bg=self.colors["bg"], width=250)
+        left_status_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20), anchor='n')
+        left_status_frame.pack_propagate(False) # Prevent frame from shrinking
 
-        tk.Label(status_frame, text="CONNECTION", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w")
-        self.connection_status_label = tk.Label(status_frame, text="DISCONNECTED", font=self.fonts["status"], bg=self.colors["bg"], fg=self.colors["status_error"])
+        tk.Label(left_status_frame, text="CONNECTION", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w")
+        self.connection_status_label = tk.Label(left_status_frame, text="DISCONNECTED", font=self.fonts["status"], bg=self.colors["bg"], fg=self.colors["status_error"])
         self.connection_status_label.pack(anchor="w", pady=(5, 15))
         
-        tk.Label(status_frame, text="DATA READOUTS", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w", pady=(10, 0))
+        tk.Label(left_status_frame, text="DATA READOUTS", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w", pady=(10, 0))
         
-        tk.Label(status_frame, text="Position Counts", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.counter_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
+        tk.Label(left_status_frame, text="Position Counts", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
+        self.counter_label = tk.Label(left_status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.counter_label.pack(anchor="w")
 
-        tk.Label(status_frame, text="Total Turns", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.turn_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
+        tk.Label(left_status_frame, text="Total Turns", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
+        self.turn_label = tk.Label(left_status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.turn_label.pack(anchor="w")
 
-        tk.Label(status_frame, text="Velocity (RPM)", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.velocity_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
+        tk.Label(left_status_frame, text="Velocity (RPM)", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
+        self.velocity_label = tk.Label(left_status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.velocity_label.pack(anchor="w")
 
-        tk.Label(status_frame, text="Direction", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
-        self.direction_label = tk.Label(status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
+        tk.Label(left_status_frame, text="Direction", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
+        self.direction_label = tk.Label(left_status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.direction_label.pack(anchor="w")
 
-        # --- Direction Toggle Button ---
-        self.toggle_button = tk.Button(status_frame, text="Toggle Direction",
-                                       font=self.fonts["button"],
-                                       bg=self.colors["button_bg"],
-                                       fg=self.colors["button_fg"],
-                                       activebackground=self.colors["text_accent"],
-                                       activeforeground=self.colors["bg"],
-                                       relief=tk.FLAT,
-                                       padx=10, pady=5,
-                                       command=self.toggle_direction)
+        self.toggle_button = tk.Button(left_status_frame, text="Toggle Direction", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], activebackground=self.colors["text_accent"], activeforeground=self.colors["bg"], relief=tk.FLAT, padx=10, pady=5, command=self.toggle_direction)
         self.toggle_button.pack(anchor="w", pady=(30, 0))
-
-        # Status Panel (Right Side)
-        status_frame = tk.Frame(content_frame, bg=self.colors["bg"])
-        status_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0))
-
-        tk.Label(status_frame, text="FEATURES", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w")
         
-        self.feature1_label = tk.Label(status_frame, text=" - Dual Protocol Ethernet/IP \n  and Modbus Connectivity", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
-        self.feature1_label.pack(anchor="w")
+        # Features Panel (Right Side)
+        right_features_frame = tk.Frame(content_frame, bg=self.colors["bg"], width=300)
+        right_features_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0), anchor='n')
+        right_features_frame.pack_propagate(False)
 
-        self.feature2_label = tk.Label(status_frame, text=" - Web Browser for Easy\n  Encoder Configuration", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
-        self.feature2_label.pack(anchor="w")
+        tk.Label(right_features_frame, text="FEATURES", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w", pady=(10, 0))
+        tk.Label(right_features_frame, text="- Dual Protocol Ethernet/IP\n& Modbus", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w", pady=(10,0))
+        tk.Label(right_features_frame, text="- Web Browser\nConfiguration", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
+        tk.Label(right_features_frame, text="- Static IP or DHCP", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
+        tk.Label(right_features_frame, text="- IP69K Rated", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
 
-        self.feature3_label = tk.Label(status_frame, text=" - Static IP or DHCP", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
-        self.feature3_label.pack(anchor="w")
 
-        self.feature4_label = tk.Label(status_frame, text=" - IP69K Rated", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
-        self.feature4_label.pack(anchor="w")
-
-        # Canvas for Compass (Right Side)
-        canvas_width = self.root.winfo_screenwidth() * 0.5
+        # Canvas for Compass (Middle)
+        # Note: This is packed last, so it fills the remaining space between the sidebars.
+        canvas_width = self.root.winfo_screenwidth() * 0.4
         canvas_height = self.root.winfo_screenheight() * 0.6
         self.canvas = tk.Canvas(content_frame, width=canvas_width, height=canvas_height, bg=self.colors["canvas_bg"], highlightthickness=0)
-        self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.center = (canvas_width / 2, canvas_height / 2)
         self.radius = min(canvas_width, canvas_height) * 0.4
 
-    def draw_initial_compass(self):
+    def draw_initial_compass(self, initial_rotation):
         """Draws the static elements of the compass dial."""
         # Main dial outline
-        self.canvas.create_oval(
-            self.center[0] - self.radius, self.center[1] - self.radius,
-            self.center[0] + self.radius, self.center[1] + self.radius,
-            outline=self.colors["dial_outline"], width=10
-        )
+        self.canvas.create_oval(self.center[0] - self.radius, self.center[1] - self.radius, self.center[0] + self.radius, self.center[1] + self.radius, outline=self.colors["dial_outline"], width=10)
         # Center pivot
-        self.canvas.create_oval(
-            self.center[0] - 8, self.center[1] - 8,
-            self.center[0] + 8, self.center[1] + 8,
-            fill=self.colors["needle"], outline=""
-        )
+        self.canvas.create_oval(self.center[0] - 8, self.center[1] - 8, self.center[0] + 8, self.center[1] + 8, fill=self.colors["needle"], outline="")
         
-        # Draw ticks for the first time
-        try:
-            initial_rotation = client.read_holding_registers(CCW_ADDR, REGISTER_COUNT, unit=1).registers[0]
-        except Exception:
-            initial_rotation = 1  # Default to CW
-            
-        # Draw a tick every 10 degrees
+        # Draw ticks for the first time using the rotation value from the thread
         for angle in range(0, 360, 10):
             self.update_tick(angle, initial_rotation)
 
@@ -202,33 +174,27 @@ class ModbusGUI:
         else:
             angle_rad = math.radians(-angle_deg - 90)
 
-        # Differentiate between major (every 45 deg) and minor (every 10 deg) ticks
         is_major_tick = (angle_deg % 45 == 0)
         tick_length = 30 if is_major_tick else 15
         tick_width = 5 if is_major_tick else 3
 
-        # Coordinates for tick mark
         x1 = self.center[0] + self.radius * math.cos(angle_rad)
         y1 = self.center[1] + self.radius * math.sin(angle_rad)
         x2 = self.center[0] + (self.radius - tick_length) * math.cos(angle_rad)
         y2 = self.center[1] + (self.radius - tick_length) * math.sin(angle_rad)
         
         if angle_deg in self.tick_lines:
-            # Update existing line
             self.canvas.coords(self.tick_lines[angle_deg], x1, y1, x2, y2)
             self.canvas.itemconfig(self.tick_lines[angle_deg], width=tick_width)
             
-            # Update existing label if it's a major tick
             if is_major_tick and angle_deg in self.tick_labels:
                 label_x = self.center[0] + (self.radius + 35) * math.cos(angle_rad)
                 label_y = self.center[1] + (self.radius + 35) * math.sin(angle_rad)
                 self.canvas.coords(self.tick_labels[angle_deg], label_x, label_y)
         else:
-            # Create new line
             line_id = self.canvas.create_line(x1, y1, x2, y2, width=tick_width, fill=self.colors["tick"])
             self.tick_lines[angle_deg] = line_id
             
-            # Create new label only for major ticks
             if is_major_tick:
                 label_x = self.center[0] + (self.radius + 35) * math.cos(angle_rad)
                 label_y = self.center[1] + (self.radius + 35) * math.sin(angle_rad)
@@ -244,7 +210,6 @@ class ModbusGUI:
         else:
             angle_rad = math.radians(-angle_deg - 90)
 
-        # Define the polygon shape for the needle
         arrow_length = self.radius - 15
         p2 = (self.center[0] + arrow_length * math.cos(angle_rad), self.center[1] + arrow_length * math.sin(angle_rad))
         p3 = (self.center[0] + 10 * math.cos(angle_rad + math.pi/2), self.center[1] + 10 * math.sin(angle_rad + math.pi/2))
@@ -282,17 +247,22 @@ class ModbusGUI:
         print("Toggle button pressed. Attempting to switch direction...")
         self.toggle_button.config(state=tk.DISABLED, text="Switching...")
         try:
-            current_dir_res = client.read_holding_registers(CCW_ADDR, 1, unit=1)
+            # CORRECTED: Use keyword arguments 'address' and 'count'
+            current_dir_res = client.read_holding_registers(address=CCW_ADDR, count=1, slave=SLAVE_ID)
+            
             if current_dir_res.isError():
                 print("Error: Could not read current direction.")
-                self.toggle_button.config(state=tk.NORMAL)
+                # The 'finally' block will still run to re-enable the button
                 return
             
             current_dir = current_dir_res.registers[0]
-            new_dir = 1 - current_dir # Flips 0 to 1 and 1 to 0
+            # Flips the direction: 0 becomes 1, and 1 becomes 0
+            new_dir = 1 - current_dir
             
             print(f"Current is {current_dir}. Writing new direction: {new_dir}")
-            write_res = client.write_register(CCW_ADDR, new_dir, unit=1)
+            
+            # CORRECTED: Use keyword arguments 'address' and 'value' for clarity
+            write_res = client.write_register(address=CCW_ADDR, value=new_dir, slave=SLAVE_ID)
             
             if write_res.isError():
                 print(f"Error: Failed to write new direction to register {CCW_ADDR}")
@@ -302,6 +272,7 @@ class ModbusGUI:
         except Exception as e:
             print(f"An exception occurred while toggling direction: {e}")
         finally:
+            # Ensure the button is always re-enabled after a short delay
             self.root.after(500, lambda: self.toggle_button.config(state=tk.NORMAL))
 
 
@@ -316,18 +287,32 @@ class ModbusGUI:
                     print("Connecting to Modbus device...")
                     client.connect()
                 
-                rotation_res = client.read_holding_registers(CCW_ADDR, REGISTER_COUNT, unit=1)
-                counter_res = client.read_holding_registers(REGISTER_ADDR, REGISTER_COUNT, unit=1)
-                turns_res = client.read_holding_registers(TURN_ADDR, REGISTER_COUNT, unit=1)
-                velocity_res = client.read_holding_registers(VELOCITY_ADDR, REGISTER_COUNT, unit=1)
+                if not client.is_socket_open():
+                    time.sleep(2)
+                    continue
+
+                if not self.is_initialized:
+                    init_rot_res = client.read_holding_registers(address=CCW_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                    if init_rot_res.isError():
+                        print("Failed to read initial rotation. Retrying...")
+                        time.sleep(1)
+                        continue
+                    
+                    initial_rotation = init_rot_res.registers[0]
+                    self.root.after(0, self.draw_initial_compass, initial_rotation)
+                    self.is_initialized = True
+                    print("Initial compass drawn.")
+
+                rotation_res = client.read_holding_registers(address=CCW_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                counter_res = client.read_holding_registers(address=REGISTER_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                turns_res = client.read_holding_registers(address=TURN_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                velocity_res = client.read_holding_registers(address=VELOCITY_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
                 
                 if rotation_res.isError() or counter_res.isError() or turns_res.isError() or velocity_res.isError():
                     print("Modbus error during read.")
-                    # Don't change connection status on a read error, only on a connect failure
                     time.sleep(1)
                     continue
 
-                # If we successfully read, we are connected
                 self.root.after(0, self.update_connection_status, True)
 
                 rotation = rotation_res.registers[0]
@@ -338,10 +323,8 @@ class ModbusGUI:
                 if turns > 32767:
                     turns -= 65536
                 
-                # --- Schedule GUI Updates ---
                 if rotation != rotation_prev:
                     print(f"Rotation changed to {'CW' if rotation == 1 else 'CCW'}")
-                    # Update all ticks when direction changes
                     for angle in self.tick_lines.keys():
                         update_func = partial(self.update_tick, angle, rotation)
                         self.root.after(0, update_func)
@@ -357,7 +340,7 @@ class ModbusGUI:
                     client.close()
                 time.sleep(2)
             
-            time.sleep(0.01)
+            time.sleep(0.1)
 
     def close(self):
         """Cleanly close the application."""
