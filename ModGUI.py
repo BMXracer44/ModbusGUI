@@ -1,26 +1,28 @@
 import tkinter as tk
+import tkinter.simpledialog as simpledialog
 import math
 import os
+import sys
 from pymodbus.client import ModbusTcpClient
 from threading import Thread
 import time
 from functools import partial
 from PIL import Image, ImageTk
 
-# --- Modbus Configuration ---
-MODBUS_HOST = '192.168.30.220'  # Modbus Device IP
+# --- Modbus Configuration (Constants) ---
 MODBUS_PORT = 502
-REGISTER_ADDR = 1  # Register Address for the main counter
+REGISTER_ADDR = 1      # Register Address for the main counter
 REGISTER_COUNT = 1
-VELOCITY_ADDR = 3  # Register Address for velocity
-TURN_ADDR = 7      # Register Address for the turn counter
-CCW_ADDR = 18      # Register Address for rotation direction (0=CCW, 1=CW)
-SLAVE_ID = 1       # The Modbus Slave ID of the device
+VELOCITY_ADDR = 3      # Register Address for velocity
+TURN_ADDR = 7          # Register Address for the turn counter
+CCW_ADDR = 18          # Register Address for rotation direction (0=CCW, 1=CW)
+SLAVE_ID = 1           # The Modbus Slave ID of the device
 
-# --- Create Modbus Client ---
-client = ModbusTcpClient(MODBUS_HOST, port=MODBUS_PORT)
+# --- Global client variable (will be initialized in main) ---
+client = None
 
 # --- GUI Class ---
+# (Your entire ModbusGUI class goes here, unchanged)
 class ModbusGUI:
     def __init__(self, root):
         self.root = root
@@ -145,9 +147,7 @@ class ModbusGUI:
         tk.Label(right_features_frame, text="- Static IP or DHCP", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         tk.Label(right_features_frame, text="- IP69K Rated", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
 
-
         # Canvas for Compass (Middle)
-        # Note: This is packed last, so it fills the remaining space between the sidebars.
         canvas_width = self.root.winfo_screenwidth() * 0.4
         canvas_height = self.root.winfo_screenheight() * 0.6
         self.canvas = tk.Canvas(content_frame, width=canvas_width, height=canvas_height, bg=self.colors["canvas_bg"], highlightthickness=0)
@@ -169,9 +169,9 @@ class ModbusGUI:
 
     def update_tick(self, angle_deg, rotation_mode):
         """Creates or updates a single compass tick and its label, with major/minor ticks."""
-        if rotation_mode == 1:
+        if rotation_mode == 1: # CW
             angle_rad = math.radians(angle_deg - 90)
-        else:
+        else: # CCW
             angle_rad = math.radians(-angle_deg - 90)
 
         is_major_tick = (angle_deg % 45 == 0)
@@ -205,9 +205,9 @@ class ModbusGUI:
         """Creates or updates the needle polygon."""
         angle_deg = (modbus_value % 4096) * 360 / 4096.0
 
-        if rotation_mode == 1:
+        if rotation_mode == 1: # CW
             angle_rad = math.radians(angle_deg - 90)
-        else:
+        else: # CCW
             angle_rad = math.radians(-angle_deg - 90)
 
         arrow_length = self.radius - 15
@@ -247,21 +247,16 @@ class ModbusGUI:
         print("Toggle button pressed. Attempting to switch direction...")
         self.toggle_button.config(state=tk.DISABLED, text="Switching...")
         try:
-            # CORRECTED: Use keyword arguments 'address' and 'count'
             current_dir_res = client.read_holding_registers(address=CCW_ADDR, count=1, slave=SLAVE_ID)
             
             if current_dir_res.isError():
                 print("Error: Could not read current direction.")
-                # The 'finally' block will still run to re-enable the button
                 return
             
             current_dir = current_dir_res.registers[0]
-            # Flips the direction: 0 becomes 1, and 1 becomes 0
             new_dir = 1 - current_dir
             
             print(f"Current is {current_dir}. Writing new direction: {new_dir}")
-            
-            # CORRECTED: Use keyword arguments 'address' and 'value' for clarity
             write_res = client.write_register(address=CCW_ADDR, value=new_dir, slave=SLAVE_ID)
             
             if write_res.isError():
@@ -272,12 +267,11 @@ class ModbusGUI:
         except Exception as e:
             print(f"An exception occurred while toggling direction: {e}")
         finally:
-            # Ensure the button is always re-enabled after a short delay
             self.root.after(500, lambda: self.toggle_button.config(state=tk.NORMAL))
-
 
     def update_loop(self):
         """Background thread to continuously read Modbus data."""
+        global client # Refer to the global client object
         rotation_prev = -1
 
         while self.running:
@@ -336,7 +330,7 @@ class ModbusGUI:
             except Exception as e:
                 print(f"Modbus connection failed: {e}")
                 self.root.after(0, self.update_connection_status, False)
-                if client.is_socket_open():
+                if client and client.is_socket_open():
                     client.close()
                 time.sleep(2)
             
@@ -346,15 +340,34 @@ class ModbusGUI:
         """Cleanly close the application."""
         print("Closing application...")
         self.running = False
-        self.modbus_thread.join(timeout=1)
-        if client.is_socket_open():
+        if hasattr(self, 'modbus_thread'): # Check if thread exists
+            self.modbus_thread.join(timeout=1)
+        if client and client.is_socket_open():
             client.close()
         self.root.destroy()
 
 # --- Launch GUI ---
 if __name__ == "__main__":
+    # Create the root window but hide it
     root = tk.Tk()
+    root.withdraw()
+
+    # Ask for the IP address
+    ip_address = simpledialog.askstring(title="IP Address Input",
+                                          prompt="Enter the IP address of your encoder:")
+    
+    # If the user clicks cancel or enters nothing, exit the program
+    if not ip_address:
+        print("No IP address entered. Exiting.")
+        root.destroy()
+        sys.exit()
+
+    # --- Create Modbus Client with the provided IP ---
+    MODBUS_HOST = ip_address
+    client = ModbusTcpClient(MODBUS_HOST, port=MODBUS_PORT)
+    
+    # Now that we have the IP, un-hide the window and build the GUI
+    root.deiconify() 
     gui = ModbusGUI(root)
     root.protocol("WM_DELETE_WINDOW", gui.close)
     root.mainloop()
-
