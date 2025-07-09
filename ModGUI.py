@@ -18,16 +18,18 @@ TURN_ADDR = 7          # Register Address for the turn counter
 CCW_ADDR = 18          # Register Address for rotation direction (0=CCW, 1=CW)
 SLAVE_ID = 1           # The Modbus Slave ID of the device
 
-# --- Global client variable (will be initialized in main) ---
-client = None
-
 # --- GUI Class ---
-# (Your entire ModbusGUI class goes here, unchanged)
 class ModbusGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Rotary Encoder Visualizer")
-        
+
+        # --- App State Variables ---
+        self.client = None
+        self.modbus_thread = None
+        self.running = False
+        self.is_initialized = False
+
         # --- Style and Color Configuration ---
         self.colors = {
             "bg": "#B1B1B1",
@@ -39,8 +41,8 @@ class ModbusGUI:
             "tick": "#909090",
             "button_bg": "#ED1F29",
             "button_fg": "#FFFFFF",
-            "status_ok": "#4CAF50",      # Green for connected
-            "status_error": "#F44336"   # Red for disconnected
+            "status_ok": "#4CAF50",      
+            "status_error": "#F44336"   
         }
         self.fonts = {
             "main": ("Segoe UI", 12),
@@ -59,16 +61,11 @@ class ModbusGUI:
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             logo_path = os.path.join(script_dir, "JoralLogo.png")
-            
-            print(f"Attempting to load logo from: {logo_path}")
-            
             img = Image.open(logo_path)
             img = img.resize((180, 60), Image.Resampling.LANCZOS)
             self.logo_photo = ImageTk.PhotoImage(img)
-        except FileNotFoundError:
-            print("Warning: JoralLogo.png not found. Make sure it is in the same directory as the script.")
         except Exception as e:
-            print(f"Error loading logo: {e}")
+            print(f"Warning: Could not load JoralLogo.png. {e}")
 
         # --- Storage for Canvas Item IDs ---
         self.tick_lines = {}
@@ -78,40 +75,46 @@ class ModbusGUI:
         # --- UI Setup ---
         self.setup_ui()
 
-        # --- Start Background Thread ---
-        # The thread will now handle the initial connection and compass drawing.
-        self.is_initialized = False # Flag to ensure initial draw happens only once.
-        self.running = True
-        self.modbus_thread = Thread(target=self.update_loop, daemon=True)
-        self.modbus_thread.start()
-
     def setup_ui(self):
         """Creates the main frames and widgets for the application."""
-        # Main container frame
         main_frame = tk.Frame(self.root, bg=self.colors["bg"])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # --- Top Frame for Logo and Title ---
         top_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         top_frame.pack(side=tk.TOP, fill=tk.X)
         
         if self.logo_photo:
-            self.logo_label = tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"])
-            self.logo_label.pack(side=tk.LEFT) 
+            tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"]).pack(side=tk.LEFT) 
+        tk.Label(top_frame, text="Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(side=tk.LEFT, expand=True)
 
-        self.title_label = tk.Label(top_frame, text="Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
-        self.title_label.pack(side=tk.LEFT, expand=True)
+        bottom_frame = tk.Frame(main_frame, bg=self.colors["bg"])
+        bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10,0))
 
+        # A sub-frame to hold the IP widgets and align them to the right
+        ip_controls_frame = tk.Frame(bottom_frame, bg=self.colors["bg"])
+        ip_controls_frame.pack(side=tk.RIGHT) # Align the group of widgets to the right
+
+        tk.Label(ip_controls_frame, text="IP Address:", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(side=tk.LEFT, padx=(0,5))
+        
+        self.ip_entry = tk.Entry(ip_controls_frame, font=self.fonts["main"], width=15)
+        self.ip_entry.pack(side=tk.LEFT)
+        self.ip_entry.insert(0, "192.168.30.190") # Default IP
+        
+        self.connect_button = tk.Button(ip_controls_frame, text="Connect", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.connect_to_ip)
+        self.connect_button.pack(side=tk.LEFT, padx=(5,0))
+        
         # --- Content Frame for Sidebars and Canvas ---
         content_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         content_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(10,0))
 
-        # Status Panel (Left Side)
+        # --- Status Panel (Left Side) ---
         left_status_frame = tk.Frame(content_frame, bg=self.colors["bg"], width=250)
         left_status_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20), anchor='n')
-        left_status_frame.pack_propagate(False) # Prevent frame from shrinking
+        left_status_frame.pack_propagate(False)
 
         tk.Label(left_status_frame, text="CONNECTION", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w")
+        
+        
         self.connection_status_label = tk.Label(left_status_frame, text="DISCONNECTED", font=self.fonts["status"], bg=self.colors["bg"], fg=self.colors["status_error"])
         self.connection_status_label.pack(anchor="w", pady=(5, 15))
         
@@ -133,10 +136,10 @@ class ModbusGUI:
         self.direction_label = tk.Label(left_status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.direction_label.pack(anchor="w")
 
-        self.toggle_button = tk.Button(left_status_frame, text="Toggle Direction", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], activebackground=self.colors["text_accent"], activeforeground=self.colors["bg"], relief=tk.FLAT, padx=10, pady=5, command=self.toggle_direction)
+        self.toggle_button = tk.Button(left_status_frame, text="Toggle Direction", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.toggle_direction)
         self.toggle_button.pack(anchor="w", pady=(30, 0))
         
-        # Features Panel (Right Side)
+        # --- Features Panel (Right Side) ---
         right_features_frame = tk.Frame(content_frame, bg=self.colors["bg"], width=300)
         right_features_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0), anchor='n')
         right_features_frame.pack_propagate(False)
@@ -146,19 +149,118 @@ class ModbusGUI:
         tk.Label(right_features_frame, text="- Web Browser\nConfiguration", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         tk.Label(right_features_frame, text="- Static IP or DHCP", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         tk.Label(right_features_frame, text="- IP69K Rated", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
-
-        # Lists IP address of encoder
-        ip_label = tk.Label(right_features_frame, text="IP Address: "+MODBUS_HOST, font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT)
-        ip_label.pack(side=tk.BOTTOM, anchor="se")
-
-        # Canvas for Compass (Middle)
-        canvas_width = self.root.winfo_screenwidth() * 0.4
-        canvas_height = self.root.winfo_screenheight() * 0.6
+        
+        # --- Canvas for Compass (Middle) ---
+        canvas_width = 800
+        canvas_height = 600
         self.canvas = tk.Canvas(content_frame, width=canvas_width, height=canvas_height, bg=self.colors["canvas_bg"], highlightthickness=0)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
         self.center = (canvas_width / 2, canvas_height / 2)
         self.radius = min(canvas_width, canvas_height) * 0.4
+
+    def connect_to_ip(self):
+        """Handles connecting to a new IP address, including cleanup of old connections."""
+        # 1. Stop any existing connection thread
+        if self.modbus_thread and self.modbus_thread.is_alive():
+            print("Stopping previous Modbus connection...")
+            self.running = False
+            self.modbus_thread.join(timeout=2) # Wait for thread to finish
+            if self.client and self.client.is_socket_open():
+                self.client.close()
+
+        # 2. Get the new IP and create a new client
+        ip_address = self.ip_entry.get()
+        if not ip_address:
+            print("Error: IP address cannot be empty.")
+            return
+            
+        print(f"Attempting to connect to {ip_address}...")
+        self.client = ModbusTcpClient(ip_address, port=MODBUS_PORT)
+        
+        # 3. Reset state and start a new connection thread
+        self.is_initialized = False
+
+        self.canvas.delete("all")
+        self.tick_lines.clear()
+        self.tick_labels.clear()
+        self.arrow_poly = None
+
+        self.running = True
+        self.modbus_thread = Thread(target=self.update_loop, daemon=True)
+        self.modbus_thread.start()
+
+    def update_loop(self):
+        """Background thread to continuously read Modbus data."""
+        rotation_prev = -1
+        
+        # This loop will terminate if self.running is set to False
+        while self.running:
+            try:
+                # Use the instance client, not a global one
+                if not self.client.is_socket_open():
+                    self.root.after(0, self.update_connection_status, False)
+                    self.client.connect()
+                
+                if not self.client.is_socket_open():
+                    time.sleep(2)
+                    continue
+
+                # Draw the compass for the first time on a new connection
+                if not self.is_initialized:
+                    init_rot_res = self.client.read_holding_registers(address=CCW_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                    if init_rot_res.isError():
+                        print("Failed to read initial rotation. Retrying...")
+                        time.sleep(1)
+                        continue
+                    
+                    initial_rotation = init_rot_res.registers[0]
+                    self.root.after(0, self.draw_initial_compass, initial_rotation)
+                    self.is_initialized = True
+                    print("Initial compass drawn.")
+
+                # Read all registers
+                rotation_res = self.client.read_holding_registers(address=CCW_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                counter_res = self.client.read_holding_registers(address=REGISTER_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                turns_res = self.client.read_holding_registers(address=TURN_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                velocity_res = self.client.read_holding_registers(address=VELOCITY_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
+                
+                if any([res.isError() for res in [rotation_res, counter_res, turns_res, velocity_res]]):
+                    print("Modbus error during read.")
+                    time.sleep(1)
+                    continue
+
+                self.root.after(0, self.update_connection_status, True)
+
+                # Process and update GUI
+                rotation = rotation_res.registers[0]
+                value = counter_res.registers[0]
+                turns = turns_res.registers[0]
+                velocity = velocity_res.registers[0]
+
+                if turns > 32767:
+                    turns -= 65536
+                
+                if rotation != rotation_prev:
+                    for angle in range(0, 360, 10):
+                        self.root.after(0, self.update_tick, angle, rotation)
+                    rotation_prev = rotation
+                
+                self.root.after(0, self.update_arrow, value, rotation)
+                self.root.after(0, self.update_gui_labels, value, turns, rotation, velocity)
+
+            except Exception as e:
+                # This block will catch connection errors if the IP is wrong
+                print(f"Modbus connection failed: {e}")
+                self.root.after(0, self.update_connection_status, False)
+                if self.client and self.client.is_socket_open():
+                    self.client.close()
+                time.sleep(2)
+            
+            # If the loop is still running, pause before the next read
+            if self.running:
+                time.sleep(0.1)
+        
+        print("Modbus thread has stopped.")
 
     def draw_initial_compass(self, initial_rotation):
         """Draws the static elements of the compass dial."""
@@ -248,11 +350,14 @@ class ModbusGUI:
     
     def toggle_direction(self):
         """Reads the current direction and writes the opposite value back."""
+        if not (self.client and self.client.is_socket_open()):
+            print("Cannot toggle direction: Not connected.")
+            return
+
         print("Toggle button pressed. Attempting to switch direction...")
         self.toggle_button.config(state=tk.DISABLED, text="Switching...")
         try:
-            current_dir_res = client.read_holding_registers(address=CCW_ADDR, count=1, slave=SLAVE_ID)
-            
+            current_dir_res = self.client.read_holding_registers(address=CCW_ADDR, count=1, slave=SLAVE_ID)
             if current_dir_res.isError():
                 print("Error: Could not read current direction.")
                 return
@@ -260,118 +365,29 @@ class ModbusGUI:
             current_dir = current_dir_res.registers[0]
             new_dir = 1 - current_dir
             
-            print(f"Current is {current_dir}. Writing new direction: {new_dir}")
-            write_res = client.write_register(address=CCW_ADDR, value=new_dir, slave=SLAVE_ID)
-            
+            write_res = self.client.write_register(address=CCW_ADDR, value=new_dir, slave=SLAVE_ID)
             if write_res.isError():
                 print(f"Error: Failed to write new direction to register {CCW_ADDR}")
             else:
                 print("Success: Direction register updated.")
-
         except Exception as e:
             print(f"An exception occurred while toggling direction: {e}")
         finally:
             self.root.after(500, lambda: self.toggle_button.config(state=tk.NORMAL))
 
-    def update_loop(self):
-        """Background thread to continuously read Modbus data."""
-        global client # Refer to the global client object
-        rotation_prev = -1
-
-        while self.running:
-            try:
-                if not client.is_socket_open():
-                    self.root.after(0, self.update_connection_status, False)
-                    print("Connecting to Modbus device...")
-                    client.connect()
-                
-                if not client.is_socket_open():
-                    time.sleep(2)
-                    continue
-
-                if not self.is_initialized:
-                    init_rot_res = client.read_holding_registers(address=CCW_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
-                    if init_rot_res.isError():
-                        print("Failed to read initial rotation. Retrying...")
-                        time.sleep(1)
-                        continue
-                    
-                    initial_rotation = init_rot_res.registers[0]
-                    self.root.after(0, self.draw_initial_compass, initial_rotation)
-                    self.is_initialized = True
-                    print("Initial compass drawn.")
-
-                rotation_res = client.read_holding_registers(address=CCW_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
-                counter_res = client.read_holding_registers(address=REGISTER_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
-                turns_res = client.read_holding_registers(address=TURN_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
-                velocity_res = client.read_holding_registers(address=VELOCITY_ADDR, count=REGISTER_COUNT, slave=SLAVE_ID)
-                
-                if rotation_res.isError() or counter_res.isError() or turns_res.isError() or velocity_res.isError():
-                    print("Modbus error during read.")
-                    time.sleep(1)
-                    continue
-
-                self.root.after(0, self.update_connection_status, True)
-
-                rotation = rotation_res.registers[0]
-                value = counter_res.registers[0]
-                turns = turns_res.registers[0]
-                velocity = velocity_res.registers[0]
-
-                if turns > 32767:
-                    turns -= 65536
-                
-                if rotation != rotation_prev:
-                    print(f"Rotation changed to {'CW' if rotation == 1 else 'CCW'}")
-                    for angle in self.tick_lines.keys():
-                        update_func = partial(self.update_tick, angle, rotation)
-                        self.root.after(0, update_func)
-                    rotation_prev = rotation
-                
-                self.root.after(0, self.update_arrow, value, rotation)
-                self.root.after(0, self.update_gui_labels, value, turns, rotation, velocity)
-
-            except Exception as e:
-                print(f"Modbus connection failed: {e}")
-                self.root.after(0, self.update_connection_status, False)
-                if client and client.is_socket_open():
-                    client.close()
-                time.sleep(2)
-            
-            time.sleep(0.1)
-
     def close(self):
         """Cleanly close the application."""
         print("Closing application...")
         self.running = False
-        if hasattr(self, 'modbus_thread'): # Check if thread exists
+        if self.modbus_thread and self.modbus_thread.is_alive():
             self.modbus_thread.join(timeout=1)
-        if client and client.is_socket_open():
-            client.close()
+        if self.client and self.client.is_socket_open():
+            self.client.close()
         self.root.destroy()
 
-# --- Launch GUI ---
+# --- NEW Launch GUI Block ---
 if __name__ == "__main__":
-    # Create the root window but hide it
     root = tk.Tk()
-    root.withdraw()
-
-    # Ask for the IP address
-    ip_address = simpledialog.askstring(title="IP Address Input",
-                                          prompt="Enter the IP address of your encoder:")
-    
-    # If the user clicks cancel or enters nothing, exit the program
-    if not ip_address:
-        print("No IP address entered. Exiting.")
-        root.destroy()
-        sys.exit()
-
-    # --- Create Modbus Client with the provided IP ---
-    MODBUS_HOST = ip_address
-    client = ModbusTcpClient(MODBUS_HOST, port=MODBUS_PORT)
-    
-    # Now that we have the IP, un-hide the window and build the GUI
-    root.deiconify() 
     gui = ModbusGUI(root)
     root.protocol("WM_DELETE_WINDOW", gui.close)
     root.mainloop()
