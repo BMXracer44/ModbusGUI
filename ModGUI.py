@@ -147,6 +147,10 @@ class ModbusGUI:
         tk.Label(right_features_frame, text="- Static IP or DHCP", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         tk.Label(right_features_frame, text="- IP69K Rated", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
 
+        # Lists IP address of encoder
+        ip_label = tk.Label(right_features_frame, text="IP Address: "+MODBUS_HOST, font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT)
+        ip_label.pack(side=tk.BOTTOM, anchor="se")
+
         # Canvas for Compass (Middle)
         canvas_width = self.root.winfo_screenwidth() * 0.4
         canvas_height = self.root.winfo_screenheight() * 0.6
