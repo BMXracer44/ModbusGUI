@@ -29,6 +29,7 @@ class ModbusGUI:
         self.modbus_thread = None
         self.running = False
         self.is_initialized = False
+        self.last_rotation_direction = 0
 
         # --- Style and Color Configuration ---
         self.colors = {
@@ -82,23 +83,31 @@ class ModbusGUI:
         
         top_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         top_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # ---Grid for perfect centering of the title--- 
+        top_frame.grid_columnconfigure(0, weight=1, uniform="equal")
+        top_frame.grid_columnconfigure(1, weight=2)
+        top_frame.grid_columnconfigure(2, weight=1, uniform="equal")
         
         if self.logo_photo:
-            tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"]).pack(side=tk.LEFT) 
-        tk.Label(top_frame, text="Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(side=tk.LEFT, expand=True)
+            logo_label = tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"])
+            logo_label.grid(row=0, column=0, sticky="w")
 
+        title_label = tk.Label(top_frame, text="Modbus TCP Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        title_label.grid(row=0, column=1)
+
+        # --- Bottom Frame for IP Controls ---
         bottom_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10,0))
 
-        # A sub-frame to hold the IP widgets and align them to the right
         ip_controls_frame = tk.Frame(bottom_frame, bg=self.colors["bg"])
-        ip_controls_frame.pack(side=tk.RIGHT) # Align the group of widgets to the right
+        ip_controls_frame.pack(side=tk.RIGHT, padx=10) 
 
         tk.Label(ip_controls_frame, text="IP Address:", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(side=tk.LEFT, padx=(0,5))
         
         self.ip_entry = tk.Entry(ip_controls_frame, font=self.fonts["main"], width=15)
         self.ip_entry.pack(side=tk.LEFT)
-        self.ip_entry.insert(0, "192.168.30.190") # Default IP
+        self.ip_entry.insert(0, "192.168.30.220") 
         
         self.connect_button = tk.Button(ip_controls_frame, text="Connect", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.connect_to_ip)
         self.connect_button.pack(side=tk.LEFT, padx=(5,0))
@@ -113,7 +122,6 @@ class ModbusGUI:
         left_status_frame.pack_propagate(False)
 
         tk.Label(left_status_frame, text="CONNECTION", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"]).pack(anchor="w")
-        
         
         self.connection_status_label = tk.Label(left_status_frame, text="DISCONNECTED", font=self.fonts["status"], bg=self.colors["bg"], fg=self.colors["status_error"])
         self.connection_status_label.pack(anchor="w", pady=(5, 15))
@@ -150,13 +158,11 @@ class ModbusGUI:
         tk.Label(right_features_frame, text="- Static IP or DHCP", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         tk.Label(right_features_frame, text="- IP69K Rated", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         
-        # --- Canvas for Compass (Middle) ---
         canvas_width = 800
         canvas_height = 600
         self.canvas = tk.Canvas(content_frame, width=canvas_width, height=canvas_height, bg=self.colors["canvas_bg"], highlightthickness=0)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.center = (canvas_width / 2, canvas_height / 2)
-        self.radius = min(canvas_width, canvas_height) * 0.4
+        self.canvas.pack(fill=tk.BOTH, expand=True) 
+        self.canvas.bind("<Configure>", self.on_canvas_resize)
 
     def connect_to_ip(self):
         """Handles connecting to a new IP address, including cleanup of old connections."""
@@ -337,6 +343,8 @@ class ModbusGUI:
 
     def update_gui_labels(self, counter_val, turns_val, rotation_val, velocity_val):
         """Thread-safe method to update the text labels in the status panel."""
+        self.last_rotation_direction = rotation_val
+
         self.counter_label.config(text=str(counter_val))
         self.turn_label.config(text=str(turns_val))
         self.velocity_label.config(text=str(velocity_val))
@@ -374,6 +382,22 @@ class ModbusGUI:
             print(f"An exception occurred while toggling direction: {e}")
         finally:
             self.root.after(500, lambda: self.toggle_button.config(state=tk.NORMAL))
+
+    def on_canvas_resize(self, event):
+        """Redraws the compass whenever the canvas size changes."""
+        # Recalculate the new center and radius
+        self.center = (event.width / 2, event.height / 2)
+        self.radius = min(event.width, event.height) * 0.4
+
+        # Clear everything from the canvas and from our state trackers
+        self.canvas.delete("all")
+        self.tick_lines.clear()
+        self.tick_labels.clear()
+        self.arrow_poly = None
+
+        # Redraw the base compass if we have already connected once
+        if self.is_initialized:
+            self.draw_initial_compass(self.last_rotation_direction)
 
     def close(self):
         """Cleanly close the application."""
