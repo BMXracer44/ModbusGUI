@@ -8,6 +8,7 @@ from threading import Thread
 import time
 from functools import partial
 from PIL import Image, ImageTk
+import requests
 
 # --- Modbus Configuration (Constants) ---
 MODBUS_PORT = 502
@@ -81,25 +82,38 @@ class ModbusGUI:
         main_frame = tk.Frame(self.root, bg=self.colors["bg"])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
+        # --- Top Frame for Logo and Title ---
         top_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         top_frame.pack(side=tk.TOP, fill=tk.X)
-
-        # ---Grid for perfect centering of the title--- 
         top_frame.grid_columnconfigure(0, weight=1, uniform="equal")
         top_frame.grid_columnconfigure(1, weight=2)
         top_frame.grid_columnconfigure(2, weight=1, uniform="equal")
-        
+
         if self.logo_photo:
             logo_label = tk.Label(top_frame, image=self.logo_photo, bg=self.colors["bg"])
             logo_label.grid(row=0, column=0, sticky="w")
-
-        title_label = tk.Label(top_frame, text="Modbus TCP Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
+        
+        title_label = tk.Label(top_frame, text="Rotary Encoder Visualizer", font=self.fonts["title"], bg=self.colors["bg"], fg=self.colors["text_accent"])
         title_label.grid(row=0, column=1)
 
-        # --- Bottom Frame for IP Controls ---
+        # --- Bottom Frame for IP and Action Controls ---
         bottom_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10,0))
 
+        # --- MOVED: Frame for action buttons, now in the bottom bar ---
+        action_frame = tk.Frame(bottom_frame, bg=self.colors["bg"])
+        action_frame.pack(side=tk.LEFT, padx=10) # Packed to the left
+        
+        self.toggle_button = tk.Button(action_frame, text="Toggle Direction", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.toggle_direction)
+        self.zero_button = tk.Button(action_frame, text="Zero Encoder", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.zero_encoder)
+        self.release_zero_button = tk.Button(action_frame, text="Release Zero", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.release_zero)
+
+        # Buttons are now in a horizontal row
+        self.toggle_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.zero_button.pack(side=tk.LEFT, padx=(0, 5))
+        self.release_zero_button.pack(side=tk.LEFT)
+        
+        # IP controls are packed to the right, so they appear on the other side
         ip_controls_frame = tk.Frame(bottom_frame, bg=self.colors["bg"])
         ip_controls_frame.pack(side=tk.RIGHT, padx=10) 
 
@@ -143,9 +157,6 @@ class ModbusGUI:
         tk.Label(left_status_frame, text="Direction", font=self.fonts["main"], bg=self.colors["bg"], fg=self.colors["text_main"]).pack(anchor="w", pady=(15, 0))
         self.direction_label = tk.Label(left_status_frame, text="--", font=self.fonts["value"], bg=self.colors["bg"], fg=self.colors["text_main"])
         self.direction_label.pack(anchor="w")
-
-        self.toggle_button = tk.Button(left_status_frame, text="Toggle Direction", font=self.fonts["button"], bg=self.colors["button_bg"], fg=self.colors["button_fg"], command=self.toggle_direction)
-        self.toggle_button.pack(anchor="w", pady=(30, 0))
         
         # --- Features Panel (Right Side) ---
         right_features_frame = tk.Frame(content_frame, bg=self.colors["bg"], width=300)
@@ -158,9 +169,8 @@ class ModbusGUI:
         tk.Label(right_features_frame, text="- Static IP or DHCP", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         tk.Label(right_features_frame, text="- IP69K Rated", font=self.fonts["features"], bg=self.colors["bg"], fg=self.colors["text_main"], justify=tk.LEFT).pack(anchor="w")
         
-        canvas_width = 800
-        canvas_height = 600
-        self.canvas = tk.Canvas(content_frame, width=canvas_width, height=canvas_height, bg=self.colors["canvas_bg"], highlightthickness=0)
+        # --- Canvas for Compass (Middle) ---
+        self.canvas = tk.Canvas(content_frame, bg=self.colors["canvas_bg"], highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True) 
         self.canvas.bind("<Configure>", self.on_canvas_resize)
 
@@ -399,6 +409,76 @@ class ModbusGUI:
         if self.is_initialized:
             self.draw_initial_compass(self.last_rotation_direction)
 
+    def zero_encoder(self):
+        # Sends HTTP POST request to zero encoder
+        
+        #Confirmation dialog 
+        if not tk.messagebox.askyesno("Confirm", "You are about to zero the encoder position. Are you sure?"):
+            return
+        
+        try:
+            # Get the current IP from the entry box
+            ip_address = self.ip_entry.get()
+            if not ip_address:
+                tk.messagebox.showerror("Error", "IP Address cannot be empty.")
+                return
+
+            # Construct the URL. Most embedded devices use http, not https.
+            url = f"http://{ip_address}/zero_offset"
+            print(f"Sending POST request to {url}...")
+
+            # Send the web request with a 5-second timeout
+            response = requests.post(url, timeout=5)
+
+            # Check if the request was successful (status code 200-299)
+            if response.ok:
+                print("Success: Zero command sent via HTTP.")
+                tk.messagebox.showinfo("Success", "Encoder zero command sent successfully.")
+            else:
+                # The request went through but the server responded with an error
+                error_message = f"Failed to send zero command. Status Code: {response.status_code}"
+                print(error_message)
+                tk.messagebox.showerror("HTTP Error", error_message)
+
+        except requests.exceptions.RequestException as e:
+            # This catches network errors like timeouts, DNS failures, or connection refused
+            print(f"An exception occurred while zeroing encoder: {e}")
+            tk.messagebox.showerror("Connection Error", f"Could not connect to the encoder.\n\n{e}")
+
+    def release_zero(self):
+        """Asks for confirmation and sends an HTTP POST request to release the zero offset."""
+        
+        # Confirmation dialog
+        if not tk.messagebox.askyesno("Confirm", "You are about to release the encoder's zero offset. Are you sure?"):
+            return
+        
+        try:
+            # Get the current IP from the entry box
+            ip_address = self.ip_entry.get()
+            if not ip_address:
+                tk.messagebox.showerror("Error", "IP Address cannot be empty.")
+                return
+
+            # Construct the URL for the release function
+            url = f"http://{ip_address}/release_offset"
+            print(f"Sending POST request to {url}...")
+
+            # Send the web request
+            response = requests.post(url, timeout=5)
+
+            if response.ok:
+                print("Success: Release zero command sent via HTTP.")
+                tk.messagebox.showinfo("Success", "Release zero command sent successfully.")
+            else:
+                error_message = f"Failed to send release zero command. Status Code: {response.status_code}"
+                print(error_message)
+                tk.messagebox.showerror("HTTP Error", error_message)
+
+        except requests.exceptions.RequestException as e:
+            print(f"An exception occurred while releasing zero: {e}")
+            tk.messagebox.showerror("Connection Error", f"Could not connect to the encoder.\n\n{e}")
+
+
     def close(self):
         """Cleanly close the application."""
         print("Closing application...")
@@ -412,6 +492,8 @@ class ModbusGUI:
 # --- NEW Launch GUI Block ---
 if __name__ == "__main__":
     root = tk.Tk()
+    root.geometry("1400x900")
+
     gui = ModbusGUI(root)
     root.protocol("WM_DELETE_WINDOW", gui.close)
     root.mainloop()
